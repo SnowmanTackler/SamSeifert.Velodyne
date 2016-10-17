@@ -12,7 +12,7 @@ using System.Net;
 
 namespace SamSeifert.Velodyne
 {
-    public partial class Form_VLP_16 : Form
+    internal partial class Form_VLP_16 : Form
     {
         /// <summary>
         /// The main entry point for the application.
@@ -41,22 +41,35 @@ namespace SamSeifert.Velodyne
 
         private void backgroundWorker1_DoWork(object sender, DoWorkEventArgs e)
         {
-            Exception initalization_exception;
+            var end = new IPEndPoint(IPAddress.Parse("192.168.1.1"), 2368);
 
-            new VLP_16(
-                new IPEndPoint(IPAddress.Parse("192.168.1.1"), 2368),
-                out initalization_exception,
-                null,
-                this.ShouldCancelAsync
-                );
+            try
+            {
+                if (true)
+                {
+                    new VLP_16_Framer(
+                        end,
+                        null,
+                        this.ShouldStopAsync
+                        );
 
-            if (initalization_exception != null)
+                }
+                else
+                {
+                    new VLP_16(
+                        end,
+                        null,
+                        this.ShouldStopAsync
+                        );
+                }
+            }
+            catch (Exception initalization_exception)
             {
                 Console.WriteLine("Initialization Error: " + initalization_exception.ToString());
             }
         }
 
-        private bool ShouldCancelAsync(UpdateArgs ua)
+        private bool ShouldStopAsync(UpdateArgs ua)
         {
             Console.WriteLine(
                 ua.PacketsReceivedCorrectly + " " + 

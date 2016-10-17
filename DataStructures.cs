@@ -25,7 +25,7 @@ namespace SamSeifert.Velodyne
         NAN,
     }
 
-    public enum LidarType
+    public enum VelodyneModel
     {
         HDL_32E,
         VLP_16,

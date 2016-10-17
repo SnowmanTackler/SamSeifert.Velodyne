@@ -15,19 +15,18 @@ namespace SamSeifert.Velodyne
     public class VLP_16
     {
         /// <summary>
-        /// This constructor won't return untill listener is done (or error)
+        /// This constructor won't return untill listener is done (or error).
+        /// It returns the raw data packets sent by the VLP-16
+        /// Throws a socket exception only on initialization.  Once everything is up and running exceptions are handled internally.
         /// </summary>
         /// <param name="d"></param>
         /// <param name="packet_recieved_sync"></param>
         /// <param name="should_cancel_async">Called at 1 Hz</param>
         public VLP_16(
             IPEndPoint d,
-            out Exception initialization_exception,
             Action<Packet, IPEndPoint> packet_recieved_sync = null,
             Func<UpdateArgs, bool> should_cancel_async = null)
         {
-            System.Threading.Thread.CurrentThread.Name = "Velodyne Listener: " + d.ToString();
-
             UdpClient cl = null;
             try
             {
@@ -36,11 +35,6 @@ namespace SamSeifert.Velodyne
                 cl.Client.ReceiveBufferSize = 4096;
 
                 this.Listen(cl, packet_recieved_sync, should_cancel_async); // This will only end when canceled
-                initialization_exception = null;
-            }
-            catch (Exception e)
-            {
-                initialization_exception = e;
             }
             finally
             {
@@ -138,8 +132,9 @@ namespace SamSeifert.Velodyne
             }
         }
 
-        /*
-        public static readonly float[] stuff =
+        public static readonly float[] LaserPitchSin; // Do this map once and hopefully save time!
+        public static readonly float[] LaserPitchCos;
+        public static readonly float[] LaserPitch = // Taken from datasheet
         {
             -15,
             1,
@@ -158,8 +153,21 @@ namespace SamSeifert.Velodyne
             -1,
             15                
         };
-        */
 
+        static VLP_16()
+        {
+            int lens = LaserPitch.Length;
+            LaserPitchCos = new float[lens];
+            LaserPitchSin = new float[lens];
+            for (int i = 0; i < lens; i++)
+            {
+                float angle_radians = UnitConverter.DegreesToRadians(LaserPitch[i]);
+                LaserPitchCos[i] = (float)Math.Cos(angle_radians);
+                LaserPitchSin[i] = (float)Math.Sin(angle_radians);
+            }
+        }
+
+        #region Data Structures Taken From Data Sheet
         public class Packet
         {
             private static HashSet<int> _BadReturnTypes = new HashSet<int>();
@@ -167,10 +175,10 @@ namespace SamSeifert.Velodyne
 
             public readonly VerticalBlockPair[] _Blocks;
             public readonly uint _Time;
-            public readonly LidarType _LidarType;
+            public readonly VelodyneModel _LidarType;
             public readonly ReturnType _ReturnType;
 
-            public unsafe Packet(Byte* b, out bool valid)
+            internal unsafe Packet(Byte* b, out bool valid)
             {
                 Raw r = *(Raw*)b;
 
@@ -207,13 +215,13 @@ namespace SamSeifert.Velodyne
                 switch (raw_lt)
                 {
                     case 21:
-                        this._LidarType = LidarType.HDL_32E;
+                        this._LidarType = VelodyneModel.HDL_32E;
                         break;
                     case 22:
-                        this._LidarType = LidarType.VLP_16;
+                        this._LidarType = VelodyneModel.VLP_16;
                         break;
                     default:
-                        this._LidarType = LidarType.NAN;
+                        this._LidarType = VelodyneModel.NAN;
 
                         if (!_BadLidarTypes.Contains(raw_lt))
                         {
@@ -263,9 +271,9 @@ namespace SamSeifert.Velodyne
         public struct VerticalBlockPair
         {
             public readonly float _Azimuth;
-            private readonly SinglePoint[] _ChannelData;
+            public readonly SinglePoint[] _ChannelData;
 
-            public unsafe VerticalBlockPair(Byte* b, out bool valid)
+            internal unsafe VerticalBlockPair(Byte* b, out bool valid)
             {
                 Raw r = *(Raw*)b;
 
@@ -307,7 +315,7 @@ namespace SamSeifert.Velodyne
             public readonly float _DistanceMeters;
             public readonly byte _Reflectivity;
 
-            public unsafe SinglePoint(Byte* b)
+            internal unsafe SinglePoint(Byte* b)
             {
                 Raw r = *(Raw*)b;
 
@@ -328,5 +336,6 @@ namespace SamSeifert.Velodyne
                 public byte _Reflectivity;
             };
         }
+        #endregion
     }
 }
