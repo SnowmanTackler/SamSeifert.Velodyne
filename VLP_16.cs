@@ -9,6 +9,9 @@ using System.Text;
 using System.Threading.Tasks;
 
 using SamSeifert.Utilities;
+using SamSeifert.Utilities.FileParsing;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.IO;
 
 namespace SamSeifert.Velodyne
 {
@@ -168,21 +171,64 @@ namespace SamSeifert.Velodyne
         }
 
         #region Data Structures Taken From Data Sheet
-        public class Packet
+        public class Packet : JsonPackable
         {
             private static HashSet<int> _BadReturnTypes = new HashSet<int>();
             private static HashSet<int> _BadLidarTypes = new HashSet<int>();
 
-            public readonly VerticalBlockPair[] _Blocks;
-            public readonly uint _Time;
-            public readonly VelodyneModel _LidarType;
-            public readonly ReturnType _ReturnType;
+            public VerticalBlockPair[] _Blocks { get; private set; }
+            public uint _Time { get; private set; }
+            public VelodyneModel _VelodyneModel { get; private set; }
+            public ReturnType _ReturnType { get; private set; }
+
+            public JsonDict Pack()
+            {
+                var of_the_jedi = new JsonDict();
+
+                of_the_jedi["Time"] = this._Time;
+                of_the_jedi["VelodyneModel"] = (int)this._VelodyneModel;
+                of_the_jedi["ReturnType"] = (int)this._ReturnType;
+
+                BinaryFormatter bf = new BinaryFormatter();
+                var blcks = new List<Object>();
+                foreach (var blck in this._Blocks)
+                {
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        bf.Serialize(ms, blck);
+                        blcks.Add(ms.ToString());
+                    }
+                }
+
+                of_the_jedi["Blocks"] = blcks.ToArray();
+
+                return of_the_jedi;
+            }
+
+            public void Unpack(JsonDict dict)
+            {
+                // All numeric entities will be doubles
+                // Round and cast them
+                this._Time = (uint)Math.Round((double)dict["Time"]);
+                this._VelodyneModel = (VelodyneModel)(int)Math.Round((double)dict["VelodyneModel"]);
+                this._ReturnType = (ReturnType)(int)Math.Round((double)dict["ReturnType"]);
+
+                var ls = new List<VerticalBlockPair>();
+
+                BinaryFormatter bf = new BinaryFormatter();
+                foreach (var ob in dict["Blocks"] as object[])
+                {
+                    using (var ms = (ob as String).AsStream())
+                    {
+                        ls.Add((VerticalBlockPair)bf.Deserialize(ms));
+                    }
+                }
+                this._Blocks = ls.ToArray();
+            }
 
             internal unsafe Packet(Byte* b, out bool valid)
             {
                 Raw r = *(Raw*)b;
-
-                this._Blocks = new VerticalBlockPair[Raw._VerticalBlockPairsPerPacket];
 
                 this._Time = 0;
                 for (int i = 0; i < 4; i++)
@@ -204,34 +250,47 @@ namespace SamSeifert.Velodyne
                         break;
                     default:
                         this._ReturnType = ReturnType.NAN;
-                        if (!_BadReturnTypes.Contains(raw_rt))
-                        {
-                            _BadReturnTypes.Add(raw_rt);
+                        bool added = false;
+                        lock (_BadReturnTypes)
+                            if (!_BadReturnTypes.Contains(raw_rt))
+                            {
+                                _BadReturnTypes.Add(raw_rt);
+                                added = true;
+                            }
+
+                        if (added)
                             Logger.WriteLine("Unrecognized Return Type: " + raw_rt);
-                        }
+
                         break;
                 }
 
                 switch (raw_lt)
                 {
                     case 21:
-                        this._LidarType = VelodyneModel.HDL_32E;
+                        this._VelodyneModel = VelodyneModel.HDL_32E;
                         break;
                     case 22:
-                        this._LidarType = VelodyneModel.VLP_16;
+                        this._VelodyneModel = VelodyneModel.VLP_16;
                         break;
                     default:
-                        this._LidarType = VelodyneModel.NAN;
-
+                        this._VelodyneModel = VelodyneModel.NAN;
+                        bool added = false;
+                        lock (_BadReturnTypes)
                         if (!_BadLidarTypes.Contains(raw_lt))
-                        {
-                            _BadLidarTypes.Add(raw_lt);
+                            {
+                                _BadLidarTypes.Add(raw_lt);
+                                added = true;
+                            }
+
+                        if (added)
                             Logger.WriteLine("Unrecognized Lidar Type: " + raw_lt);
-                        }
+
                         break;
                 }
 
                 valid = true;
+
+                this._Blocks = new VerticalBlockPair[Raw._VerticalBlockPairsPerPacket];
 
                 for (int i = 0, byte_index = 0;
                     i < Raw._VerticalBlockPairsPerPacket;
@@ -268,6 +327,7 @@ namespace SamSeifert.Velodyne
             };
         }
 
+        [Serializable]
         public struct VerticalBlockPair
         {
             public readonly float _Azimuth;
@@ -310,6 +370,7 @@ namespace SamSeifert.Velodyne
             }
         }
 
+        [Serializable]
         public struct SinglePoint
         {
             public readonly float _DistanceMeters;
