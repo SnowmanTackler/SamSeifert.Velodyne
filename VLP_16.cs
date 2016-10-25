@@ -188,19 +188,7 @@ namespace SamSeifert.Velodyne
                 of_the_jedi["Time"] = this._Time;
                 of_the_jedi["VelodyneModel"] = (int)this._VelodyneModel;
                 of_the_jedi["ReturnType"] = (int)this._ReturnType;
-
-                BinaryFormatter bf = new BinaryFormatter();
-                var blcks = new List<Object>();
-                foreach (var blck in this._Blocks)
-                {
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                        bf.Serialize(ms, blck);
-                        blcks.Add(ms.ToString());
-                    }
-                }
-
-                of_the_jedi["Blocks"] = blcks.ToArray();
+                of_the_jedi["Blocks"] = Array.ConvertAll(this._Blocks, item => (object)item.Pack());
 
                 return of_the_jedi;
             }
@@ -212,18 +200,12 @@ namespace SamSeifert.Velodyne
                 this._Time = (uint)Math.Round((double)dict["Time"]);
                 this._VelodyneModel = (VelodyneModel)(int)Math.Round((double)dict["VelodyneModel"]);
                 this._ReturnType = (ReturnType)(int)Math.Round((double)dict["ReturnType"]);
+                this._Blocks = Array.ConvertAll(dict["Blocks"] as object[], item => new VerticalBlockPair(item as JsonDict));
+            }
 
-                var ls = new List<VerticalBlockPair>();
-
-                BinaryFormatter bf = new BinaryFormatter();
-                foreach (var ob in dict["Blocks"] as object[])
-                {
-                    using (var ms = (ob as String).AsStream())
-                    {
-                        ls.Add((VerticalBlockPair)bf.Deserialize(ms));
-                    }
-                }
-                this._Blocks = ls.ToArray();
+            public Packet(JsonDict d)
+            {
+                this.Unpack(d);
             }
 
             internal unsafe Packet(Byte* b, out bool valid)
@@ -231,8 +213,8 @@ namespace SamSeifert.Velodyne
                 Raw r = *(Raw*)b;
 
                 this._Time = 0;
-                for (int i = 0; i < 4; i++)
-                    this._Time = (this._Time << 8) | r._TimeStamp[i];
+                for (int i = 4; i > 0; i--)
+                    this._Time = (this._Time << 8) | r._TimeStamp[i - 1];
 
                 int raw_rt = r._Factory[0];
                 int raw_lt = r._Factory[1];
@@ -327,11 +309,10 @@ namespace SamSeifert.Velodyne
             };
         }
 
-        [Serializable]
-        public struct VerticalBlockPair
+        public struct VerticalBlockPair : JsonPackable
         {
-            public readonly float _Azimuth;
-            public readonly SinglePoint[] _ChannelData;
+            public float _Azimuth { get; private set; }
+            public SinglePoint[] _ChannelData { get; private set; }
 
             internal unsafe VerticalBlockPair(Byte* b, out bool valid)
             {
@@ -347,6 +328,41 @@ namespace SamSeifert.Velodyne
                     i < Raw._SinglePointsPerVerticalBlock;
                     i++, byte_index += SinglePoint.Raw._Size)
                     this._ChannelData[i] = new SinglePoint(&r._ChannelData[byte_index]);
+            }
+
+            internal VerticalBlockPair(JsonDict dict)
+            {
+                this._Azimuth = 0;
+                this._ChannelData = null;
+                this.Unpack(dict);
+            }
+
+            public JsonDict Pack()
+            {
+                var of_the_jedi = new JsonDict();
+                of_the_jedi["Azimuth"] = this._Azimuth;
+                of_the_jedi["Length"] = this._ChannelData.Length;
+                of_the_jedi["Distances"] = Array.ConvertAll(this._ChannelData, item => (object)item._DistanceMeters);
+                of_the_jedi["Reflectivities"] = Array.ConvertAll(this._ChannelData, item => (object)item._Reflectivity);
+                return of_the_jedi;
+            }
+
+            public void Unpack(JsonDict dict)
+            {
+                this._Azimuth = (float)(double)dict["Azimuth"];
+
+                int lens = (int)(double)dict["Length"];
+
+                this._ChannelData = new SinglePoint[lens];
+
+                var distances = dict["Distances"] as object[];
+                var reflectivities = dict["Reflectivities"] as object[];
+
+                for (int i = 0; i < lens; i++)
+                    this._ChannelData[i] = new SinglePoint(
+                            (float)(double)distances[i],
+                            (byte)Math.Round((double)reflectivities[i])
+                        );
             }
 
             [StructLayout(LayoutKind.Explicit, Pack = 1)]
@@ -384,6 +400,13 @@ namespace SamSeifert.Velodyne
                 this._DistanceMeters = ((r._Distance[1] << 8) | (r._Distance[0])) * 0.002f; // 2 MM increments
                 this._Reflectivity = r._Reflectivity;
             }
+
+            internal SinglePoint(float distance_meters, byte reflectivity)
+            {
+                this._DistanceMeters = distance_meters;
+                this._Reflectivity = reflectivity;
+            }
+            
 
             [StructLayout(LayoutKind.Explicit, Pack = 1)]
             internal unsafe struct Raw

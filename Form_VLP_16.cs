@@ -45,23 +45,8 @@ namespace SamSeifert.Velodyne
 
             try
             {
-                if (true)
-                {
-                    new VLP_16_Framer(
-                        end,
-                        null,
-                        this.ShouldStopAsync
-                        );
-
-                }
-                else
-                {
-                    new VLP_16(
-                        end,
-                        null,
-                        this.ShouldStopAsync
-                        );
-                }
+                // new VLP_16_Framer(end, null, this.ShouldStopAsync);
+                new VLP_16(end, null, this.ShouldStopAsync);
             }
             catch (Exception initalization_exception)
             {
