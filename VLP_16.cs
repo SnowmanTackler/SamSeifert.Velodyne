@@ -17,6 +17,9 @@ namespace SamSeifert.Velodyne
 {
     public class VLP_16
     {
+        public delegate void PacketRecieved(Packet p, IPEndPoint ip);
+        public delegate bool ShouldCancel(UpdateArgs a);
+
         /// <summary>
         /// This constructor won't return untill listener is done (or error).
         /// It returns the raw data packets sent by the VLP-16
@@ -27,8 +30,8 @@ namespace SamSeifert.Velodyne
         /// <param name="should_cancel_async">Called at 1 Hz</param>
         public VLP_16(
             IPEndPoint d,
-            Action<Packet, IPEndPoint> packet_recieved_sync = null,
-            Func<UpdateArgs, bool> should_cancel_async = null)
+            PacketRecieved packet_recieved_sync = null,
+            ShouldCancel should_cancel_async = null)
         {
             UdpClient cl = null;
             try
@@ -48,10 +51,12 @@ namespace SamSeifert.Velodyne
             }
         }
 
+
+
         private unsafe void Listen(
             UdpClient cl,
-            Action<Packet, IPEndPoint> packet_recieved_sync,
-            Func<UpdateArgs, bool> should_cancel_async)
+            PacketRecieved packet_recieved_sync,
+            ShouldCancel should_cancel_async)
         {
             DateTime start = DateTime.Now;
             int elapsed_seconds = 0;

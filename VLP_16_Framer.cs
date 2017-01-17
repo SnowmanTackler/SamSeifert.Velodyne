@@ -34,7 +34,7 @@ namespace SamSeifert.Velodyne
         public VLP_16_Framer(
             IPEndPoint d,
             Action<Frame> frame_pop = null,
-            Func<UpdateArgs, bool> should_cancel_async = null)
+            VLP_16.ShouldCancel should_cancel_async = null)
         {
             this._FramePop = frame_pop;
 
