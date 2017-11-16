@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using System.Net;
+using SamSeifert.Utilities;
 
 namespace SamSeifert.Velodyne
 {
@@ -50,7 +51,7 @@ namespace SamSeifert.Velodyne
             }
             catch (Exception initalization_exception)
             {
-                Console.WriteLine("Initialization Error: " + initalization_exception.ToString());
+                Logger.WriteException(this, "Initialization", initalization_exception);
             }
         }
 
