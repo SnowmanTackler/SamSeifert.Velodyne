@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using SamSeifert.Utilities;
+using SamSeifert.Utilities.Extensions;
 
 namespace SamSeifert.Velodyne
 {
