@@ -12,35 +12,39 @@ using SamSeifert.Utilities;
 using SamSeifert.Utilities.Json;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.IO;
+using SamSeifert.Utilities.Extensions;
 
 namespace SamSeifert.Velodyne
 {
-    public class VLP_16
+    /// <summary>
+    /// Velodyne's spit back data constantly.  If you'd like to manually handle each parsed packet, use this class (static Listen method).  If you only want to handle data 
+    /// every time the sensor makes a complete revolution, use the VLP_16_Framer Class (static Listen method).
+    /// </summary>
+    public static class VLP_16
     {
-        public delegate void PacketRecieved(Packet p, IPEndPoint ip);
-        public delegate bool ShouldCancel(UpdateArgs a);
+        public delegate void PacketRecieved(Packet p, IPEndPoint velodyne_ip);
 
         /// <summary>
-        /// This constructor won't return untill listener is done (or error).
+        /// This method won't return untill listener is done (canceled manually, or error).
         /// It returns the raw data packets sent by the VLP-16
         /// Throws a socket exception only on initialization.  Once everything is up and running exceptions are handled internally.
         /// </summary>
-        /// <param name="d"></param>
-        /// <param name="packet_recieved_sync"></param>
-        /// <param name="should_cancel_async">Called at 1 Hz</param>
-        public VLP_16(
-            IPEndPoint d,
-            PacketRecieved packet_recieved_sync = null,
-            ShouldCancel should_cancel_async = null)
+        /// <param name="endpoint">Where to listen for data</param>
+        /// <param name="packet_recieved_callback">New data gets parsed, sent to this method.</param>
+        /// <param name="should_cancel_callback">Hearbeat function, called at 1 Hz, can stop the velodyne listener</param>
+        public static void Listen(
+            IPEndPoint endpoint,
+            PacketRecieved packet_recieved_callback = null,
+            ShouldCancel should_cancel_callback = null)
         {
             UdpClient cl = null;
             try
             {
-                cl = new UdpClient(new IPEndPoint(d.Address, d.Port));
+                cl = new UdpClient(new IPEndPoint(endpoint.Address, endpoint.Port));
                 cl.Client.ReceiveTimeout = 250; // .25 Seconds
                 cl.Client.ReceiveBufferSize = 4096;
 
-                this.Listen(cl, packet_recieved_sync, should_cancel_async); // This will only end when canceled
+                Listen_(cl, packet_recieved_callback, should_cancel_callback); // This will only end when canceled
             }
             finally
             {
@@ -51,12 +55,10 @@ namespace SamSeifert.Velodyne
             }
         }
 
-
-
-        private unsafe void Listen(
+        private static unsafe void Listen_(
             UdpClient cl,
-            PacketRecieved packet_recieved_sync,
-            ShouldCancel should_cancel_async)
+            PacketRecieved packet_recieved_callback,
+            ShouldCancel should_cancel_callback)
         {
             DateTime start = DateTime.Now;
             int elapsed_seconds = 0;
@@ -84,11 +86,7 @@ namespace SamSeifert.Velodyne
                         if (valid)
                         {
                             corrects++;
-
-                            if (packet_recieved_sync != null)
-                            {
-                                packet_recieved_sync(p, iep);
-                            }
+                            packet_recieved_callback?.Invoke(p, iep);
                         }
                         else
                         {
@@ -110,7 +108,7 @@ namespace SamSeifert.Velodyne
                 }
                 catch (Exception e)
                 {
-                    Logger.WriteLine(this.GetType().FullName + ": " + e.ToString());
+                    Logger.WriteException(typeof(VLP_16), "Listen", e);
                     incorrects++;
                 }
 
@@ -121,7 +119,7 @@ namespace SamSeifert.Velodyne
 
                     var st = new UpdateArgs();
 
-                    st.SocketErrors = timeouts;
+                    st.Timeouts = timeouts;
                     st.PacketsReceivedCorrectly = corrects;
                     st.PacketsReceivedIncorrectly = incorrects;
                     st.SocketErrors = socketerrors;
@@ -131,18 +129,17 @@ namespace SamSeifert.Velodyne
                     incorrects = 0;
                     socketerrors = 0;
 
-                    if (should_cancel_async != null)
-                        if (should_cancel_async(st))
-                        {
+                    if (should_cancel_callback != null)
+                        if (should_cancel_callback(st))
                             return;
-                        }
                 }
             }
         }
 
+        public const int _Lasers = 16;
         public static readonly float[] LaserPitchSin; // Do this map once and hopefully save time!
         public static readonly float[] LaserPitchCos;
-        public static readonly float[] LaserPitch = // Taken from datasheet
+        public static readonly float[] LaserPitch = new float[_Lasers] // Taken from datasheet
         {
             -15,
             1,
@@ -178,9 +175,6 @@ namespace SamSeifert.Velodyne
         #region Data Structures Taken From Data Sheet
         public class Packet : JsonPackable
         {
-            private static HashSet<int> _BadReturnTypes = new HashSet<int>();
-            private static HashSet<int> _BadLidarTypes = new HashSet<int>();
-
             public VerticalBlockPair[] _Blocks { get; private set; }
             public uint _Time { get; private set; }
             public VelodyneModel _VelodyneModel { get; private set; }
@@ -221,59 +215,8 @@ namespace SamSeifert.Velodyne
                 for (int i = 4; i > 0; i--)
                     this._Time = (this._Time << 8) | r._TimeStamp[i - 1];
 
-                int raw_rt = r._Factory[0];
-                int raw_lt = r._Factory[1];
-
-                switch (raw_rt)
-                {
-                    case 37:
-                        this._ReturnType = ReturnType.Strongest;
-                        break;
-                    case 38:
-                        this._ReturnType = ReturnType.Last;
-                        break;
-                    case 39:
-                        this._ReturnType = ReturnType.Dual;
-                        break;
-                    default:
-                        this._ReturnType = ReturnType.NAN;
-                        bool added = false;
-                        lock (_BadReturnTypes)
-                            if (!_BadReturnTypes.Contains(raw_rt))
-                            {
-                                _BadReturnTypes.Add(raw_rt);
-                                added = true;
-                            }
-
-                        if (added)
-                            Logger.WriteLine("Unrecognized Return Type: " + raw_rt);
-
-                        break;
-                }
-
-                switch (raw_lt)
-                {
-                    case 21:
-                        this._VelodyneModel = VelodyneModel.HDL_32E;
-                        break;
-                    case 22:
-                        this._VelodyneModel = VelodyneModel.VLP_16;
-                        break;
-                    default:
-                        this._VelodyneModel = VelodyneModel.NAN;
-                        bool added = false;
-                        lock (_BadReturnTypes)
-                        if (!_BadLidarTypes.Contains(raw_lt))
-                            {
-                                _BadLidarTypes.Add(raw_lt);
-                                added = true;
-                            }
-
-                        if (added)
-                            Logger.WriteLine("Unrecognized Lidar Type: " + raw_lt);
-
-                        break;
-                }
+                this._ReturnType = Parse.ReturnType_(r._Factory[0]);
+                this._VelodyneModel = Parse.VelodyneModel_(r._Factory[1]);
 
                 valid = true;
 
@@ -292,16 +235,19 @@ namespace SamSeifert.Velodyne
             [StructLayout(LayoutKind.Explicit, Pack = 1)]
             internal unsafe struct Raw
             {
+                /// <summary>
+                /// Size of the structure in bytes
+                /// </summary>
                 public const int _Size = _FactoryE;
                 public const int _VerticalBlockPairsPerPacket = 12;
 
-                // private const int _HeaderE = 42;
-                private const int _DataBlockE = VerticalBlockPair.Raw._Size * _VerticalBlockPairsPerPacket;
-                private const int _TimeStampE = 4 + _DataBlockE;
-                private const int _FactoryE = 2 + _TimeStampE;
+                // private const int _HeaderE = 42; // UDP Will Filter This Heading OUT
+                private const int _DataBlockE = VerticalBlockPair.Raw._Size * _VerticalBlockPairsPerPacket; // index after data block E(nd)
+                private const int _TimeStampE = 4 + _DataBlockE; // index after time stamp E(nd)
+                private const int _FactoryE = 2 + _TimeStampE; // index after factory E(nd)
 
                 // [FieldOffset(0)]
-                // public fixed byte _Header[42]; // UDP Will Filter This Out
+                // public fixed byte _Header[42]; // UDP Will Filter This Heading OUT
 
                 [FieldOffset(0)]
                 public fixed byte _DataBlocks[VerticalBlockPair.Raw._Size * _VerticalBlockPairsPerPacket];
@@ -329,10 +275,8 @@ namespace SamSeifert.Velodyne
 
                 this._ChannelData = new SinglePoint[Raw._SinglePointsPerVerticalBlock];
 
-                for (int i = 0, byte_index = 0;
-                    i < Raw._SinglePointsPerVerticalBlock;
-                    i++, byte_index += SinglePoint.Raw._Size)
-                    this._ChannelData[i] = new SinglePoint(&r._ChannelData[byte_index]);
+                for (int i = 0; i < Raw._SinglePointsPerVerticalBlock; i++)
+                    this._ChannelData[i] = new SinglePoint(&r._ChannelData[i * SinglePoint.Raw._Size]);
             }
 
             internal VerticalBlockPair(JsonDict dict)
@@ -354,31 +298,28 @@ namespace SamSeifert.Velodyne
 
             public void Unpack(JsonDict dict)
             {
-                this._Azimuth = (float)(double)dict["Azimuth"];
-
-                int lens = (int)(double)dict["Length"];
-
-                this._ChannelData = new SinglePoint[lens];
-
+                this._Azimuth = dict.asFloat("Azimuth");
+                int lens = dict.asInt("Length");
                 var distances = dict["Distances"] as object[];
                 var reflectivities = dict["Reflectivities"] as object[];
-
-                for (int i = 0; i < lens; i++)
-                    this._ChannelData[i] = new SinglePoint(
-                            (float)(double)distances[i],
-                            (byte)Math.Round((double)reflectivities[i])
-                        );
+                this._ChannelData = new SinglePoint[lens];
+                this._ChannelData.Fill(i => new SinglePoint(
+                        (float)(double)distances[i],
+                        (byte)Math.Round((double)reflectivities[i])));
             }
 
             [StructLayout(LayoutKind.Explicit, Pack = 1)]
             internal unsafe struct Raw
             {
-                public const int _SinglePointsPerVerticalBlock = 32;
+                /// <summary>
+                /// Size of the structure in bytes
+                /// </summary>
                 public const int _Size = _ChannelDataE;
+                public const int _SinglePointsPerVerticalBlock = 32;
 
-                private const int _HeaderE = 2;
-                private const int _AzimuthE = 2 + _HeaderE;
-                private const int _ChannelDataE = SinglePoint.Raw._Size * _SinglePointsPerVerticalBlock + _AzimuthE;
+                private const int _HeaderE = 2; // index after header E(nd)
+                private const int _AzimuthE = 2 + _HeaderE; // index after azimuth E(nd)
+                private const int _ChannelDataE = SinglePoint.Raw._Size * _SinglePointsPerVerticalBlock + _AzimuthE; // index after channel data E(nd)
 
                 [FieldOffset(0)]
                 public fixed byte _Header[2];
@@ -410,12 +351,14 @@ namespace SamSeifert.Velodyne
             {
                 this._DistanceMeters = distance_meters;
                 this._Reflectivity = reflectivity;
-            }
-            
+            }            
 
             [StructLayout(LayoutKind.Explicit, Pack = 1)]
             internal unsafe struct Raw
             {
+                /// <summary>
+                /// Size of the structure in bytes
+                /// </summary>
                 public const int _Size = 3;
 
                 [FieldOffset(0)]

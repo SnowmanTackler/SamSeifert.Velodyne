@@ -10,50 +10,81 @@ using SamSeifert.Utilities.Extensions;
 
 namespace SamSeifert.Velodyne
 {
+    /// <summary>
+    /// Velodyne's spit back data constantly.  If you'd like to manually handle each parsed packet, use the VLP_16 Class (static Listen Method).  If you only want to handle data 
+    /// every time the sensor makes a complete revolution, use this class (static Listen method).
+    /// </summary>
     public class VLP_16_Framer
     {
-        private IPEndPoint _Sender;
+        public delegate void FrameRecieved(Frame f, IPEndPoint velodyne_ip);
+
+        private IPEndPoint _VelodynesIP = null;
 
         private float _LastAzimuth;
         private float _LastMeasuredAzimuth;
+        /// <summary>
+        /// Maintain an estimate of the sensor angular velocity to interpolate data that doesn't have a measured azimuth (every other point)
+        /// </summary>
         private float _AngularVelocity = 0;
-
-        private Action<Frame> _FramePop;
 
         /// <summary>
         /// Azimuth, Data
         /// </summary>
-        private List<Tuple<float, VLP_16.SinglePoint[]>> _List = new List<Tuple<float, VLP_16.SinglePoint[]>>();
+        private readonly List<Tuple<float, VLP_16.SinglePoint[]>> _List = new List<Tuple<float, VLP_16.SinglePoint[]>>();
+
+        private FrameRecieved _NewFrameCallback;
 
         /// <summary>
         /// Throws a socket exception only on initialization.  Once everything is up and running exceptions are handled internally.
         /// </summary>
-        /// <param name="d"></param>
-        /// <param name="initialization_exception"></param>
-        /// <param name="frame_pop"></param>
-        /// <param name="should_cancel_async">Called at 1 Hz</param>
-        public VLP_16_Framer(
-            IPEndPoint d,
-            Action<Frame> frame_pop = null,
-            VLP_16.ShouldCancel should_cancel_async = null)
+        /// <param name="endpoint"></param>
+        /// <param name="new_frame_callback"></param>
+        /// <param name="should_cancel_callback">Called at 1 Hz</param>
+        public static void Listen(
+            IPEndPoint endpoint,
+            FrameRecieved new_frame_callback = null,
+            ShouldCancel should_cancel_callback = null)
         {
-            this._FramePop = frame_pop;
-
-            new VLP_16(
-                d,
-                this.RecievePacket,
-                should_cancel_async);
+            var framer = new VLP_16_Framer(new_frame_callback);
+            VLP_16.Listen(
+                endpoint,
+                framer.RecievePacket,
+                should_cancel_callback);
         }
 
-        private void RecieveBlocks(VLP_16.SinglePoint[] point16)
+        private VLP_16_Framer(FrameRecieved new_frame_callback)
+        {
+            this._NewFrameCallback = new_frame_callback;
+        }
+
+        private void RecievePacket(VLP_16.Packet pack, IPEndPoint velodyne_ip)
+        {
+            if (this._VelodynesIP == null) this._VelodynesIP = velodyne_ip;
+            else if (this._VelodynesIP.Equals(velodyne_ip))
+            {
+                foreach (var blck in pack._Blocks)
+                {
+                    this.RecieveBlocks(velodyne_ip, blck._ChannelData.SubArray(0, 16), blck._Azimuth);
+                    this.RecieveBlocks(velodyne_ip, blck._ChannelData.SubArray(16, 16)); // interpolate azimuth
+                }
+            }
+            else
+            {
+                this._VelodynesIP = velodyne_ip;
+                throw new Exception("Multiple sender IPEndPoint's " + this._VelodynesIP.ToString() + " " + velodyne_ip.ToString());
+            }
+        }
+
+        private void RecieveBlocks(IPEndPoint sender, VLP_16.SinglePoint[] point16)
         {            
             this.RecieveBlocks(
+                sender,
                 point16, 
                 this._LastMeasuredAzimuth + this._AngularVelocity * 0.5f, // Assume half way in between others!
                 true);
         }
 
-        private void RecieveBlocks(VLP_16.SinglePoint[] point16, float azimuth, bool interpolated = false)
+        private void RecieveBlocks(IPEndPoint sender, VLP_16.SinglePoint[] point16, float azimuth, bool interpolated = false)
         {
             // azimuth can vary from 0 to a little more than 360 (in the case of interpolated points)
 
@@ -61,38 +92,33 @@ namespace SamSeifert.Velodyne
             {
                 float change = azimuth - this._LastMeasuredAzimuth;
                 if (change < 0) change += 360;
-                this._AngularVelocity = 0.9f * this._AngularVelocity + 0.1f * change;
+                this._AngularVelocity = 0.9f * this._AngularVelocity + 0.1f * change; // Low pass filter velocity
                 this._LastMeasuredAzimuth = azimuth;
             }
 
-            // Split frames directly behind front
+            // Split frames directly behind front of velodyne sensor
             if ((this._LastAzimuth <= 180) && (azimuth > 180)) // Flip
-            {
-                this.CompletedRevolution();
-            }
+                this.CompletedRevolution(sender);
 
             this._List.Add(new Tuple<float, VLP_16.SinglePoint[]>(azimuth, point16));
-
             this._LastAzimuth = azimuth;
         }
 
-        private void CompletedRevolution()
+        private void CompletedRevolution(IPEndPoint ip)
         {
-            if (this._FramePop != null)
+            if (this._NewFrameCallback != null)
             {
-                const int lasers = 16;
-
-                var frame = new Frame(lasers, this._List.Count);
+                var frame = new Frame(VLP_16._Lasers, this._List.Count);
 
                 for (int index = 0; index < this._List.Count; index++)
                 {
                     var tup = this._List[index];
 
-                    float angle_radians = SamSeifert.Utilities.UnitConverter.DegreesToRadians(tup.Item1);
+                    float angle_radians = UnitConverter.DegreesToRadians(tup.Item1);
                     float sin = (float)Math.Sin(angle_radians);
                     float cos = (float)Math.Cos(angle_radians);
 
-                    for (int l = 0; l < lasers; l++)
+                    for (int l = 0; l < VLP_16._Lasers; l++)
                     {
                         VLP_16.SinglePoint rd = tup.Item2[l];
 
@@ -114,28 +140,9 @@ namespace SamSeifert.Velodyne
                     }
                 }
 
-                this._FramePop(frame);
+                this._NewFrameCallback(frame, ip);
             }
-            this._List.Clear(); // Keep Internal Length
-
-        }
-
-        private void RecievePacket(VLP_16.Packet pack, IPEndPoint sender)
-        {
-            if (this._Sender == null) this._Sender = sender;
-            else if (this._Sender.Equals(sender))
-            {
-                foreach (var blck in pack._Blocks)
-                {
-                    this.RecieveBlocks(blck._ChannelData.SubArray(0, 16), blck._Azimuth);
-                    this.RecieveBlocks(blck._ChannelData.SubArray(0, 16)); // interpolate azimuth
-                }
-            }
-            else
-            {
-                this._Sender = sender;
-                throw new Exception("Multiple sender IPEndPoint's");
-            }
+            this._List.Clear();
         }
     }
 }
