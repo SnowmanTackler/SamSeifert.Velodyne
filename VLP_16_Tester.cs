@@ -48,16 +48,24 @@ namespace SamSeifert.Velodyne
             this.backgroundWorker1.RunWorkerAsync();
         }
 
+        private void VLP_16_Tester_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            this.SaveFormState();
+        }
+
         private void backgroundWorker1_DoWork(object sender, DoWorkEventArgs e)
         {
-            var end = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 2368);
+            var end = new IPEndPoint(IPAddress.Parse("192.167.1.2"), 2368);
 
+            Logger.WriteLine();
             Logger.WriteLine("Listening for VLP_16 on " + end.ToString());
             Logger.WriteLine();
 
             try
             {
-                VLP_16.Listen(end, null, this.ShouldStopAsync);
+                // VLP_16 will callback with live data ASAP, VLP_16_Framer will callback with data once per laser column revoltuion
+                if (true)  VLP_16.Listen(end, this.PacketRecievedAsync, this.ShouldStopAsync);
+                else VLP_16_Framer.Listen(end, this.FrameRecievedAsync, this.ShouldStopAsync);
             }
             catch (Exception initalization_exception)
             {
@@ -65,15 +73,22 @@ namespace SamSeifert.Velodyne
             }
         }
 
+
+
+        private void PacketRecievedAsync(VLP_16.Packet p, IPEndPoint velodyne_ip)
+        {
+
+        }
+
+        private void FrameRecievedAsync(Frame f, IPEndPoint velodyne_ip)
+        {
+            Logger.WriteLine("New Frame From:" + velodyne_ip.ToString());
+        }
+
         private bool ShouldStopAsync(UpdateArgs ua)
         {
             Logger.WriteLine(ua.ToString());
             return false;
-        }
-
-        private void VLP_16_Tester_FormClosing(object sender, FormClosingEventArgs e)
-        {
-            this.SaveFormState();
         }
     }
 }
