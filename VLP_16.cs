@@ -40,7 +40,7 @@ namespace SamSeifert.Velodyne
             UdpClient cl = null;
             try
             {
-                cl = new UdpClient(new IPEndPoint(endpoint.Address, endpoint.Port));
+                cl = new UdpClient(new IPEndPoint(IPAddress.Any, endpoint.Port));
                 cl.Client.ReceiveTimeout = 250; // .25 Seconds
                 cl.Client.ReceiveBufferSize = 4096;
 
