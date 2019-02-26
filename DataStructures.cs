@@ -1,4 +1,4 @@
-﻿using SamSeifert.Utilities;
+﻿using SamSeifert.Utilities; using SamSeifert.Utilities.Maths;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;

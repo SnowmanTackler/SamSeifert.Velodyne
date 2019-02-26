@@ -8,11 +8,12 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
-using SamSeifert.Utilities;
-using SamSeifert.Utilities.Json;
+using SamSeifert.Utilities; using SamSeifert.Utilities.Maths;
+using SamSeifert.Utilities.Files.Json;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.IO;
 using SamSeifert.Utilities.Extensions;
+using SamSeifert.Utilities.Maths;
 
 namespace SamSeifert.Velodyne
 {
