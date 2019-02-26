@@ -37,7 +37,7 @@ namespace SamSeifert.Velodyne
             if (!ModifierKeys.HasFlag(Keys.Control)) // Set to default position!
                 this.LoadFormState();
 
-            Logger.LogToTextbox(this.textBox1, () => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+            this.textBox1.UseAsLogger(() => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
 
             /*
             Logger.WriteLine("VLP_16.Packet: " + VLP_16.Packet.Raw._Size + ", " + sizeof(VLP_16.Packet.Raw));

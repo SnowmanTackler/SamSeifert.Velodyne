@@ -87,7 +87,11 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\SamSeifert.Utilities\SamSeifert.Utilities.csproj">
+    <ProjectReference Include="..\SamSeifert.Utilities\SamSeifert.Utilities.Forms\SamSeifert.Utilities.Forms.csproj">
+      <Project>{a40930fa-af7b-4017-852d-a14370c7c9b1}</Project>
+      <Name>SamSeifert.Utilities.Forms</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\SamSeifert.Utilities\SamSeifert.Utilities\SamSeifert.Utilities.csproj">
       <Project>{a9446cbe-818f-45f6-8894-068693da47ca}</Project>
       <Name>SamSeifert.Utilities</Name>
     </ProjectReference>
